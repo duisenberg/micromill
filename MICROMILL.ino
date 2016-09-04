@@ -193,7 +193,8 @@ unsigned long time,time_main,time_disposition,time_display;
 byte stepper_sequence_clw[8] = {B01000, B01100, B00100, B00110, B00010, B00011, B00001, B01001};
 byte stepper_sequence_ccw[8] = {B00001, B00011, B00010, B00110, B00100, B01100, B01000, B01001};
 byte stepperX_spos=0,stepperY_spos=0,stepperZ_spos=0,steps_X_step=0,steps_Y_step=0,steps_Z_step=0;
-long current_steps_X_pos = 0;
+long current_steps_X_pos = 0,current_steps_Z_pos=0;
+boolean tool_status=0,fan_status=0;
 
 
 boolean stepperX_enabled=0;
@@ -608,12 +609,14 @@ void waitForDisposition(){
  
 //Tool & Fan control - supporting ON/OFF only, may change to support PWM
 void toolControl(boolean mode){
-  if(mode && tool_motor) digitalWrite(TOOL_CONTROL,LOW); 
-                  else   digitalWrite(TOOL_CONTROL,HIGH);
+  tool_motor = mode;
+  if(mode) digitalWrite(TOOL_CONTROL,LOW); //ON
+    else   digitalWrite(TOOL_CONTROL,HIGH);//OFF
   }
 void fanControl(boolean mode){
-  if(mode && fan_motor) digitalWrite(FAN_CONTROL,LOW); 
-                 else   digitalWrite(FAN_CONTROL,HIGH);
+  fan_motor = mode;
+  if(mode) digitalWrite(FAN_CONTROL,LOW); 
+    else   digitalWrite(FAN_CONTROL,HIGH);
   }
 
 //grab chars from stream 
@@ -864,8 +867,8 @@ void machineInit(){//test the homing condition
      setStepperDelays(X_max_speed,Y_max_speed,Z_max_speed);
      steps_Z_goto = 0; 
      Serial.println(F("[***END PROGRAM** - resume Z]"));
-     tool_motor = OFF; toolControl(tool_motor);
-     fan_motor = OFF; fanControl(fan_motor);
+     toolControl(OFF);
+     fanControl(OFF);
      waitForDisposition();
      steps_X_goto = 0; steps_Y_goto = 0; 
      waitForDisposition();
@@ -882,8 +885,8 @@ void machineInit(){//test the homing condition
      }
    
    //spindle cw/ccw needs PWM support
-   if(M==3||M==4) { tool_motor = ON; toolControl(tool_motor); return 0; }
-   if(M==5)       { tool_motor = OFF; toolControl(tool_motor); return 0; }
+   if(M==3||M==4) { toolControl(ON); return 0; }
+   if(M==5)       { toolControl(OFF); return 0; }
      
    if(M==6){ //Toolchange procedure
       //this will drive the X table into a proper position 
@@ -896,10 +899,13 @@ void machineInit(){//test the homing condition
       if(!toolchange_procedure){
             waitForDisposition();
             Serial.println(F("error:[TOOLCHANGE OPERATION]"));
+            current_steps_Z_pos=steps_Z_pos;
             steps_Z_goto = 0;
+            waitForDisposition();
+            tool_status= tool_motor;
+            fan_status = fan_motor;
             toolControl(OFF);
             fanControl(OFF);
-            waitForDisposition();
             current_steps_X_pos = steps_X_pos;
             toolchange_procedure = TRUE;
             steps_X_goto = X_TOOLCHANGE_POS;
@@ -909,13 +915,15 @@ void machineInit(){//test the homing condition
             waitForDisposition();
             toolControl(tool_motor);
             fanControl(fan_motor);
+            steps_Z_goto = current_steps_Z_pos;
+            waitForDisposition();
             toolchange_procedure = FALSE;
             return 0;
             }
       }
    
-   if(M==10) {fan_motor = ON; fanControl(fan_motor); return 0;} 
-   if(M==11) {fan_motor = OFF; fanControl(fan_motor); return 0;} 
+   if(M==10) {fanControl(ON); return 0;} 
+   if(M==11) {fanControl(OFF); return 0;} 
         
    if(M==17) { steppers_enable = TRUE; return 0; }//enable steppers
    if(M==18) { steppers_enable = FALSE; steppersPowersave(); return 0; }
@@ -958,9 +966,9 @@ void machineInit(){//test the homing condition
       if(X<9999) steps_X_goto=getSteps(steps_X_pos,steps_X_perunit,X,this_dimension_absolute);
       if(Y<9999) steps_Y_goto=getSteps(steps_Y_pos,steps_Y_perunit,Y,this_dimension_absolute);
 #ifdef DEBUG
-      Serial.print("G0 goto da:"); Serial.print(this_dimension_absolute);
-      Serial.print(" X:");Serial.print(steps_X_goto);Serial.print(" Y:");Serial.print(steps_Y_goto);
+      Serial.print("G0 X:");Serial.print(steps_X_goto);Serial.print(" Y:");Serial.print(steps_Y_goto);
       Serial.print(" Z:");Serial.println(steps_Z_goto);
+      sendStatus();
 #endif
       waitForDisposition();
       return 0;
@@ -969,7 +977,7 @@ void machineInit(){//test the homing condition
    //G1 running in material command. 
    //review: setting XY feedrate in doLine
    if(G == 1){ //check for valid pos
-      if(tool_auto_off) toolControl(ON);
+      if(tool_auto_off==TRUE) toolControl(ON);
       long x=steps_X_pos;
       long y=steps_Y_pos;
       long z=steps_Z_pos;
@@ -988,14 +996,14 @@ void machineInit(){//test the homing condition
       }
  
 #ifdef DEBUG
-      Serial.print("G1 goto X:");;Serial.print(x);Serial.print(" Y:");Serial.print(y);
+      Serial.print("G1 goto X:");;Serial.print(x);Serial.print(" Y:");Serial.print(y);Serial.print(" Z:");Serial.println(z);
       sendStatus();
 #endif
       return doLine(x,y,z,FR);
      }
 
    if(G == 2||G==3){
-      if(tool_auto_off) toolControl(ON);
+      if(tool_auto_off==TRUE) toolControl(ON);
       long  stepsX=steps_X_pos,stepsY=steps_X_pos,stepsZ=steps_Z_pos,stepsI=steps_X_pos,stepsJ=steps_Y_pos;
       stepsX=getSteps(stepsX,steps_X_perunit,X,this_dimension_absolute);
       stepsY=getSteps(stepsY,steps_Y_perunit,Y,this_dimension_absolute);
@@ -1036,7 +1044,7 @@ void machineInit(){//test the homing condition
       stepperY_delay = Y_max_speed;
       stepperZ_delay = Z_max_speed;
       if(steps_Z_pos < 0) { steps_Z_goto = 0; waitForDisposition();} //move Z first
-       if(tool_auto_off) toolControl(OFF);
+       if(tool_auto_off==TRUE) toolControl(OFF);
       steps_X_goto = 0;
       steps_Y_goto = 0;
       steps_Z_goto = 0;
@@ -1047,7 +1055,7 @@ void machineInit(){//test the homing condition
    //review: before issuing a drill cmd Z should be at a safe position. 
    //we then move to xy and than z to retract pos.      
    if(G == 82 ) { // Drill mode G82 XYZ Rretract Pdwell Ffeed Lrepeats
-     if(tool_auto_off) toolControl(ON);
+     if(tool_auto_off==TRUE) toolControl(ON);
      long bottom_hole = 0.0;
      if(Z<9999) { //this should always be absolute here, shouldnt it?
         stepperZ_delay =  Z_DRILL_SPEED ; 
@@ -1106,7 +1114,7 @@ void machineInit(){//test the homing condition
      waitForDisposition();
 
      steps_Z_goto = retract_pos;
-     if(tool_auto_off) toolControl(ON);
+     if(tool_auto_off==TRUE) toolControl(ON);
      waitForDisposition();  
      
      int dwell_time = 500; if(P>0.1) dwell_time = P * 1000; //ms
@@ -1316,8 +1324,12 @@ int doLine(long x1, long y1,long z1,float fr){
   waitForDisposition();
   machine_idle = FALSE;
 
+  if(x1==0xFFFE) x1=steps_X_pos;
+  if(y1==0xFFFE) y1=steps_Y_pos;
+  if(z1==0xFFFE) z1=steps_Z_pos;
+  
   //if its a single Z move just move it 
-  if(x1==steps_X_pos&&y1==steps_Y_pos) {steps_Z_goto=z1; waitForDisposition(); return 0; }
+  if(x1==steps_X_pos&&y1==steps_Y_pos&&z1!=steps_Z_pos) {steps_Z_goto=z1; waitForDisposition(); return 0; }
   
   long x0 = steps_X_pos;
   long y0 = steps_Y_pos;
@@ -1423,19 +1435,23 @@ Serial.println("ARC PROC.");
   double angle=from_angle;
   double dt=(theta/180.0)*0.5; // 0.5 deg steps 
   long dk =0;
-  if(k!=0) k/(theta/dt); //steps to go / number of steps 
+  if(k!=0xFFFE&&k!=0) dk=k/(theta/dt); //steps to go / number of steps 
   int steps; 
 
 #ifdef ARC_DEBUG
- Serial.print("ARC: cx:");Serial.println(cx);
- Serial.print("ARC: cy:");Serial.println(cy);
- Serial.print("ARC: radius:");Serial.println(radius);
- Serial.print("ARC: from r:");Serial.print(from_angle);
- Serial.print(" deg:");Serial.println(from_angle*180.0/PI);
- Serial.print("ARC: to r:");Serial.print(to_angle);
- Serial.print(" deg:");Serial.println(to_angle*180.0/PI);
- Serial.print("ARC: theta:");Serial.println(theta,8);
- Serial.print("ARC: dtheta:");Serial.println(dt,8);
+ Serial.print("cx:");Serial.println(cx);
+ Serial.print("cy:");Serial.println(cy);
+ Serial.print(" x:");Serial.println(x);
+ Serial.print(" y:");Serial.println(y);
+ Serial.print(" k:");Serial.println(k);
+ Serial.print("radius:");Serial.println(radius);
+ Serial.print("from r:");Serial.print(from_angle);
+ Serial.print("   deg:");Serial.println(from_angle*180.0/PI);
+ Serial.print("  to r:");Serial.print(to_angle);
+ Serial.print("   deg:");Serial.println(to_angle*180.0/PI);
+ Serial.print(" theta:");Serial.println(theta,8);
+ Serial.print("dtheta:");Serial.println(dt,8);
+ Serial.print("dk:");Serial.println(dk,8);
 #endif
   
   //the default circle is like -90 deg turned and mirrored
@@ -1485,7 +1501,7 @@ Serial.println("ARC PROC.");
       angle=angle+dt;
       
       nk=nk+dk;
-      doLine(nx,ny,dk,fr);
+      doLine(nx,ny,nk,fr);
       waitForDisposition();
       }
     } else {//cw angles
@@ -1687,7 +1703,7 @@ void checkMode(){
     Serial.print(F("FR "));
     Serial.print(F(" X:"));Serial.print(calculateFeedrate(X_work_speed, steps_X_perunit));
     Serial.print(F(" Y:"));Serial.print(calculateFeedrate(Y_work_speed, steps_Y_perunit));
-    Serial.print(F("Z:"));Serial.println(calculateFeedrate(Z_work_speed, steps_Z_perunit));
+    Serial.print(F(" Z:"));Serial.println(calculateFeedrate(Z_work_speed, steps_Z_perunit));
     Serial.print(F("XY coords "));
     if(dimension_absolute) Serial.println(F("abs"));
       else                 Serial.println(F("rel"));
@@ -1698,6 +1714,7 @@ void checkMode(){
     Serial.print(F("Check mode "));
     if(!steppers_enable) Serial.println(enable_string);
       else               Serial.println(disable_string);
+    if(tool_auto_off==TRUE) Serial.println(F("Tool auto on"));
 
     
   }
