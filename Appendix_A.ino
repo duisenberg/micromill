@@ -127,12 +127,12 @@ But if tools are prepared carefully before to have same height and insertion - m
 tape - the table can be driven into a position far beyond MAX X. Thus the toolhead becomes accessible, the 
 next tool can be mounted - with care but without any change to the Z-axis. The table is driven back to its
 prior position then and the job can be resumed.
-The tool change sequence currently is 
-M00
+The tool change sequence is 
 M06
 M06
-Each command has to be in a single line. If the ugs issue - at error send next line and then stop - is solved, 
-two M6 should work as expected.
+Each command has to be in a single line. The first M06 issues an error to force the sender into pause mode, 
+drives the table to toolchange position. Resuming the file transfer, the second M6 drives the table back to
+its last position and the file can be worked off then.
 
 Feedrate issue
 The steppers speed is controlled by the stepper delays, so it can be set only in discrete portions. The lower a
