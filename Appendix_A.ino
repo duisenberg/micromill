@@ -52,6 +52,7 @@ M10                   - Vaccuum cleaner (Fan) on
 M11                   - Vaccuum cleaner (Fan) off
 M17                   - enable all steppers
 M18                   - disable all steppers
+M30                   - end program (aka M02)
 M37                   - check mode, steppers disabled
 
 M120                  - enable endstop detection (not supported, compile time settable only)
@@ -112,12 +113,12 @@ This feature may change in future as the G-standard seems to suppose to switch t
 "per program" until another command resets the feature. 
 
 G2/G3 issues
-G2 and G3 commands are meant to draw arcs and circles. Some programs uses them for that, some are able to 
-replace them with lines. To support helical movement - move in circles with xy and feed z in that motion - 
-the Z parameter is supported. G2/G3 only works for arcs up to 180 deg, Z-1.8 should drive the Z axis for
-0.01mm per degree, but the Z axis's resolution is 0.06mm per step ...
-Havin relatively big arcs close to 180 deg, in some cases it may happen that start and endpoint overshoot
-for some degree. It may be an issue with the atan2 routine, it may come from using steps instead of mm. 
+Default for G2/G3 is G17 XY plane - G18 and G19 are not supported. G2/G3 do work up to 180 deg per command. For
+helical movement - move in circles with xy and feed z in that motion - the Z parameter is supported. In this
+case Z steps will be distributed linear to the XY path for the arc command. In reference mill construction the 
+Z resolution is only 0.06mm per step, so with a 90 deg arc with 0.6mm Z the arc procedure will increase Z like
+1 step per 10 deg.
+
 
 Tool change feature
 One awkward thing for the Mill is to change tools. The machine holder at its stand has to be turned, the 
