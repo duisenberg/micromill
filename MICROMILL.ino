@@ -66,7 +66,8 @@
 
 #define HOMING FALSE // set TRUE to force initial homing
 
-#define EMERGENCY_SWITCH 1 //define how to use it 0  - just hold things until pressed again
+
+#define EMERGENCY_SWITCH 42 //define how to use it 0  - just hold things until pressed again
                            //                       1  - like 0 but with alarm sound/led
                            //                       2  - reboot (doing nothing at restart - not supported yet)
                            //                       42 - activate PIN_MISC only
@@ -77,7 +78,7 @@
 //* Machine specific parameters, construction related
 //* *************************************************
 
-#define STEPPER_INTERVAL 250 //1250us for timer intr, 1250us 800Hz -> 100Hz/turn max speed -> max torque 10Hz
+#define STEPPER_INTERVAL 250 //1250us for timer intr, 1250us 800Hz -> 100Hz/turn max speed 
                              //may be set down to 250 for testing reasons w/o motors
 
 //max steps per sec = 1/interval 
@@ -185,7 +186,7 @@ volatile byte ptr=0;
 volatile int maxval;
 
 //misc globals, manual control, vcc monitor etc.
-unsigned long time,time_main,time_disposition,time_display;
+unsigned long time_main,time_disposition,time_display;
 
 
   
@@ -254,14 +255,13 @@ float feedrate = MAX_X_FEEDRATE; //obsolete, stats only
 //be aware that each jobs header should set these! 
 boolean dimension_absolute = TRUE;   //default G90/91
 boolean cp_absolute = TRUE;          //default G90.1/91.1
-
   
 //Units setting
 boolean unit_is_mm = TRUE; //the default unit is mm
   
 volatile unsigned int machine_init_delay = 0;
 boolean translate_Z=FALSE; //interpret positive Z as negative
-double translate_Z_offset=0; //with translation, add/sub the offset from 
+double  translate_Z_offset=0; //with translation, add/sub the offset from 
                             //the incoming Z coordinate to get it into bounds
 boolean toolchange_procedure = FALSE;
 boolean tool_motor = OFF;
@@ -339,7 +339,6 @@ void setup(void) {
  #endif
  
   delay(1000); //burn a second to honor the lost and gone ones
-  time=millis();
 
   //former display cycle, now this is used for pausing  
   time_display = millis();
@@ -359,7 +358,7 @@ void setup(void) {
 void core(void){
     doSerialComm();
     doSteps();
-    if(status_request) send_status();    
+    if(status_request) sendStatus();    
 }
  
  //the main loop 
@@ -398,16 +397,16 @@ if(control_mode == CONTROL_INTERNAL){
 //positively rearmed at 0 position.  Set X_MIN/Y_MIN/Z_MAX appropriate.
 
    if(stepperZ_endswitch==TRUE){
-         if(digitalRead(A1)==HIGH) stepperZ_endswitch=FALSE; // normal operation
+         if(digitalRead(ENDSWITCH_X)==HIGH) stepperZ_endswitch=FALSE; // normal operation
          if(steps_Z_goto > 0) steps_Z_goto = 0; //go to 0 position
          } 
   //the x switch may need a replacement
   if(stepperX_endswitch==TRUE){
-         if(digitalRead(A0)==HIGH) stepperX_endswitch=FALSE; // normal operation
+         if(digitalRead(ENDSWITCH_Z)==HIGH) stepperX_endswitch=FALSE; // normal operation
          if(steps_X_goto < 0 ) steps_X_goto = 0;
          } 
   if(stepperY_endswitch==TRUE){
-         if(digitalRead(A3)==HIGH) stepperY_endswitch=FALSE; // normal operation
+         if(digitalRead(ENDSWITCH_Y)==HIGH) stepperY_endswitch=FALSE; // normal operation
          if(steps_Y_goto < 0) steps_Y_goto = 0;
          } 
  //Control mode INTERNAL done
@@ -484,25 +483,25 @@ void doSteps(){
 #ifdef ENDSWITCHES_ENABLED
      //Homing 
     if(stepperX_endswitch==0)
-       if(digitalRead(A0)==LOW){
+       if(digitalRead(ENDSWITCH_Z)==LOW){
                   stepperX_endswitch=1;//disarm endswitch
                   steps_X_goto = X_MIN_POS; //set position to -2mm
                   steps_X_pos  = steps_X_goto;
-                  stepperX_enabled = 1;//accept manual commands
+                  stepperX_enabled = 1;
                   }
     if(stepperY_endswitch==0)
-       if(digitalRead(A3)==LOW){
-                  stepperY_endswitch=1;//disarm endswitch
+       if(digitalRead(ENDSWITCH_Y)==LOW){
+                  stepperY_endswitch=1;
                   steps_Y_goto = Y_MIN_POS;
                   steps_Y_pos  = steps_Y_goto;
-                  stepperY_enabled = 1;//accept manual commands
+                  stepperY_enabled = 1;
                   }
     if(stepperZ_endswitch==0)
-       if(digitalRead(A1)==LOW){
-                  stepperZ_endswitch=1;//disarm endswitch
+       if(digitalRead(ENDSWITCH_X)==LOW){
+                  stepperZ_endswitch=1;
                   steps_Z_goto = Z_MAX_POS;
                   steps_Z_pos  = steps_Z_goto;
-                  stepperZ_enabled = 1;//accept manual commands
+                  stepperZ_enabled = 1;
                   }
     
     //for the homing run we need to go under min pos. the endswitches save it here
@@ -527,7 +526,7 @@ void doSteps(){
   
      if(steps_Y_goto > steps_Y_pos) doStepY(1,1);
      if(steps_Y_goto < steps_Y_pos) doStepY(1,0);
-     
+
      if(steps_X_goto == steps_X_pos && steps_Y_goto == steps_Y_pos && steps_Z_goto == steps_Z_pos) machine_idle = TRUE;
   
        
@@ -673,7 +672,6 @@ void machineInit(){//test the homing condition
    
  //we answer with ok meaning command is parsed, accepted and executed
  //error:[...] for anything failed
- //review: hex returns
  void executeSerialCommand(){
   if(!serial_command_available) return;
   
@@ -691,9 +689,8 @@ void machineInit(){//test the homing condition
   if(res==-101) { sendError(F("HALT mode activated]")); return; }
   if(res==-121) { sendError(F("toolchange mode - no G commands]")); return; }
   
-#ifdef DEBUG
-  Serial.println(F("error:[unknown command or parameter]"));
-#endif
+
+ sendError(F("error:[unknown command or parameter]"));
  }
  
  //this is the main control routine, we parse our command, split it into parts and
@@ -711,6 +708,7 @@ void machineInit(){//test the homing condition
    sei();
   
   //do not process anything until serial control is enabled
+  //review: this should never happen
   if(control_mode == CONTROL_INTERNAL) {  return -31; }
   
  #ifdef DEBUG
@@ -724,11 +722,12 @@ void machineInit(){//test the homing condition
    //                            - G90/G91 absolute or incremental argument following
    //                            - degrees in decimal or part of decimal
    //                            - +- is part of the dimension word
-
+   //review: all numbers are translated using the ato functions. 
+   
    char cmd_part[8][16],*tmp; //cmdno cmd x y z part 
    byte j=0,k=0,n_parts=0,ng=0;
    boolean has_whitespace=FALSE; //some grbl senders strip spaces  
-   int ret=-1; //return value
+   int ret=-1; //default return value
    
    for(byte i=0;i<strlen(cmd);i++){
      if(cmd[i]=='G') ng++; //count the number of G's in the command
@@ -754,6 +753,7 @@ void machineInit(){//test the homing condition
      }
    cmd_part[j][k]=0;
    n_parts = j;
+   
    int N=-1,M=-1,S=0,T=0;
    float G=-1.0;
    double X=9999.0,Y=9999.0,Z=9999.0,I=9999.0,J=9999.0,K=9999.0,R=9999.0,FR=0.0,E=0.0,L=0.0,P=0.0,Q=0.0; 
@@ -768,6 +768,7 @@ void machineInit(){//test the homing condition
 
   //command preprocessor part 
   
+     //line numbers are monitored but mostly ignored.
      if(cmd_part[i][0] == 'N'){
        N = atoi(tmp);
        if(N <= command_last_line) { continue;} //ignore the line count
@@ -782,15 +783,15 @@ void machineInit(){//test the homing condition
 
       if(cmd_part[i][0] == 'S') { return 0; } //spindle speed - ignored
       
-     //some senders send things like G91 G21 as the command, we do not want this to be an error
+     //some senders send things like G91 G21 as the command, we do not want this to be an error 
+     //but the G91 and G91.1 setting would affect the current line only
+    
      if(ng>1){ //we have multiple G in this line so the "setting" G's only count for this command
-               //review: some gcodes have header lines like N000 G17 G20 G90 to set the "defaults" for the
-               //        current g-file. This would like with the units not work well, so be careful!
 
        float arg = atof(tmp);
        if(cmd_part[i][0] == 'G' && arg==90){ this_dimension_absolute=TRUE; continue; } 
        if(cmd_part[i][0] == 'G' && arg==90.1){ this_cp_absolute=TRUE; continue; } //current cmd incremental 
-       if(cmd_part[i][0] == 'G' && arg==91.0){ this_dimension_absolute=FALSE; continue; } //current cmd incremental 
+       if(cmd_part[i][0] == 'G' && arg==91){ this_dimension_absolute=FALSE; continue; } //current cmd incremental 
        if(cmd_part[i][0] == 'G' && arg==91.1){ this_cp_absolute=FALSE; continue; } //current cmd incremental 
        if(cmd_part[i][0] == 'G' && arg==17){ ret=0; continue; } //select XY plane (ignored, may need review)
        if(cmd_part[i][0] == 'G' && arg==20){ unit_is_mm=FALSE; setStepsPerUnit(INCH); ret=0; continue; } //select unit inch
@@ -863,7 +864,7 @@ void machineInit(){//test the homing condition
      return -101;
      }
  
-   if(M == 2) { //end program - reset settings, turn off things - review
+   if(M == 2|| M == 30) { //end program - reset settings, turn off things - review
      setStepperDelays(X_max_speed,Y_max_speed,Z_max_speed);
      steps_Z_goto = 0; 
      Serial.println(F("[***END PROGRAM** - resume Z]"));
@@ -891,14 +892,13 @@ void machineInit(){//test the homing condition
    if(M==6){ //Toolchange procedure
       //this will drive the X table into a proper position 
       //and stay in toolchange mode until another M6 command comes in.
-      //so the user has sufficient time to xhange the tool. 
+      //so the user has sufficient time to change the tool. 
       //in toolchange mode, only M commands are processed. 
       //to force ugs to pause transmission, we issue an error 
-      //(currently an M00 must be placed before the two M06 due to an ugs issue)
       
       if(!toolchange_procedure){
             waitForDisposition();
-            Serial.println(F("error:[TOOLCHANGE OPERATION]"));
+            sendError(F("TOOLCHANGE OPERATION]"));
             current_steps_Z_pos=steps_Z_pos;
             steps_Z_goto = 0;
             waitForDisposition();
@@ -942,14 +942,14 @@ void machineInit(){//test the homing condition
        
     //M-commands done
     
-    if(toolchange_procedure) return(-121); //do not procedd G commands while active
+    if(toolchange_procedure) return(-121); //do not proceed G commands while active
     
     if(FR>0) return setFeedrate(FR); //single F-command - set new feedrate 
 
     //see if we have a limit violation
     if(!check_X_limit(getSteps(steps_X_pos,steps_X_perunit,X,this_dimension_absolute))) return -10;
     if(!check_Y_limit(getSteps(steps_Y_pos,steps_Y_perunit,Y,this_dimension_absolute))) return -10;
-    //use the Z translation feature with care review: doc
+    //use the Z translation feature with care 
     //Serial.print(" Z:");Serial.print(Z);Serial.print(" sZ:");Serial.println(abs(Z)* steps_Z_perunit);
     if(!check_Z_limit(getSteps(steps_Z_pos,steps_Z_perunit,Z,this_dimension_absolute))) return -10;  //Z works only in negative Quadrant
     //the circle center may be out of bounds
@@ -968,14 +968,14 @@ void machineInit(){//test the homing condition
 #ifdef DEBUG
       Serial.print("G0 X:");Serial.print(steps_X_goto);Serial.print(" Y:");Serial.print(steps_Y_goto);
       Serial.print(" Z:");Serial.println(steps_Z_goto);
-      sendStatus();
+      sendSettings();
 #endif
       waitForDisposition();
       return 0;
      } 
      
    //G1 running in material command. 
-   //review: setting XY feedrate in doLine
+   //review: setting feedrate in doLine
    if(G == 1){ //check for valid pos
       if(tool_auto_off==TRUE) toolControl(ON);
       long x=steps_X_pos;
@@ -997,7 +997,7 @@ void machineInit(){//test the homing condition
  
 #ifdef DEBUG
       Serial.print("G1 goto X:");;Serial.print(x);Serial.print(" Y:");Serial.print(y);Serial.print(" Z:");Serial.println(z);
-      sendStatus();
+      sendSettings();
 #endif
       return doLine(x,y,z,FR);
      }
@@ -1029,7 +1029,7 @@ void machineInit(){//test the homing condition
       return 0;
       }
       
-     //halt at the last given coors
+    //halt at the last given coords
     if(G==9){waitForDisposition(); return 0;}
      
     if(G==17) return 0;  //select XY plane, default and only setting
@@ -1057,7 +1057,7 @@ void machineInit(){//test the homing condition
    if(G == 82 ) { // Drill mode G82 XYZ Rretract Pdwell Ffeed Lrepeats
      if(tool_auto_off==TRUE) toolControl(ON);
      long bottom_hole = 0.0;
-     if(Z<9999) { //this should always be absolute here, shouldnt it?
+     if(Z<9999) { //review: this should always be absolute here, shouldnt it?
         stepperZ_delay =  Z_DRILL_SPEED ; 
         if(FR>0) stepperZ_delay = calculateDelay(FR, steps_Z_perunit,STEPPERZ_MAX_DELAY);
         bottom_hole=getSteps(steps_Z_pos,steps_Z_perunit,Z,this_dimension_absolute);
@@ -1161,13 +1161,6 @@ void machineInit(){//test the homing condition
      }
 
   //G commands done
-
-  //single F command
-  if(FR>0){
-    feedrate = FR;
-    setFeedrate(FR);
-   return 0;
-  }
     
   return ret;
  }
@@ -1203,7 +1196,7 @@ void printUnit(){
 // this works off the grbl specific commands $$ etc.
 int grblCommand(char *n){
 
-        if(n[0]=='G') { sendStatus(); return 0; } 
+        if(n[0]=='G') { sendSettings(); return 0; } 
         if(n[0]=='$') { sendParameters(255);  return 0; }
         if(n[0]==0)   { sendHelp(); return 0; } //not ideal here
         if(n[0]=='C') { checkMode() ; steppersPowersave(); return 0;}
@@ -1254,9 +1247,9 @@ void  setStepperDelays(byte x,byte y,byte z){
    X_work_speed = calculateDelay(fr,steps_X_perunit,STEPPERX_MAX_DELAY);
    Y_work_speed = calculateDelay(fr,steps_Y_perunit,STEPPERY_MAX_DELAY);
    Z_work_speed = calculateDelay(fr,steps_Z_perunit,STEPPERZ_MAX_DELAY);
-   
+   feedrate = fr;
 #ifdef DEBUG
-  sendStatus();
+  sendSettings();
 #endif
  return 0;
  }
@@ -1669,7 +1662,7 @@ void sendHelp(){
       setStepsPerUnit(unit_is_mm); //reset units to what it was
 }
  
-void send_status(){
+void sendStatus(){
      status_request = FALSE;
      Serial.print("<"); 
      if(machine_idle==TRUE) Serial.print(F("Idle,"));
@@ -1698,7 +1691,7 @@ void checkMode(){
   }
 
 //$G print out some status data that isnt covered elsewhere
- void sendStatus(){
+ void sendSettings(){
     printUnit();
     Serial.print(F("FR "));
     Serial.print(F(" X:"));Serial.print(calculateFeedrate(X_work_speed, steps_X_perunit));
