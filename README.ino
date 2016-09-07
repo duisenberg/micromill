@@ -63,12 +63,12 @@ By default X and Y axes do work in positive, the Z-axis works in negative space.
 is available.
 
 
-4. Sending GCode, UGS Setup
+5. Sending GCode, UGS Setup
 GCode has to be sent line by line, the sender has to monitor the stream for "ok" or "error" before sending the next
 command. (Sender Settings: Enable Single Step Mode) Also the sender should not strip whitespaces, this feature is 
 available but not recommended to use. 
 
-The UGS version used is the classic interface from nightly build of August 29,2016. The "platform" Version should
+The UGS version used is the classic interface from nightly build of September 04,2016. The "platform" Version should
 work too, since better configurable for inidivual firmware needs like customized jog commands it might be the
 future version of choice, if the sender systems monitor is wide enough.
 
@@ -81,7 +81,7 @@ Appendix B: Reference Mill details
 Appendix C: Mill setup and finetuning 
 
 
-5. DISCLAIMER
+6. DISCLAIMER
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
 License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any 
 later version.
