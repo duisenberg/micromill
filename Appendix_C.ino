@@ -58,11 +58,11 @@ help to see how things will run.
 Having more sophisticated constructions in mind, a quite poerful way to go is FreeCAD. It still is in early
 state of development, expect many things work only in their "specific" way, often enough a part file needs 
 to be redone from scratch because things went haywired. Especially in Paths workbench. Once the Machine and 
-Tool is set up, be sure to click the whole part in project tree before making a surface and creating a path
+Tool is set up, be sure to click the whole part in project tree before marking a surface and creating a path
 object. From Versions 0.14 seems to create paths ok, 0.15 and 0.16 bummer, 0.17 looks like Paths is working
 again. Starting with a very simple object like a block with a pocket is strongly suggested. 
 
-As from Freecad - other Cad's may be same - Parts are sometimes created using all coordinate system quadrants.
+As from Freecad - other CAD's may be same - Parts are sometimes created using all coordinate system quadrants.
 If defining coordinate axes as part of the construction - some tutorials suggest to do so - it might come to
 issues later in path, if the object has to be moved to fit into the build coordinates of the mill. 
 
@@ -70,7 +70,7 @@ In common construction the object is built in positive Z quadrant. To ease thing
 set a Z coords translation to negative. This way the produced gcode can be used directly. Use M935 to disable
 the translation (default setting). If this feature shall be used, in Freecad Machine settings set Z MAX 20mm 
 MIN 0mm and place a M934 P-20 into the gcode header.  
-With the linux_cnc post processor Freecad seems to export G2/G3 with relative CP without setting G91.1. 
+A micromill post processor script is available. 
 
 
 
