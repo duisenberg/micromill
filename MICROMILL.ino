@@ -124,20 +124,22 @@ byte stepperZ_pins[4]={10,11,12,13}; //maps to ULN1-4
 #define Y_STEPS_perInch 129413
 #define Z_STEPS_perInch   4191
 
-//hard limits
-#define X_MAX_POS 407600 //80mm
-#define Y_MAX_POS 509500 //100mm
-#define Z_MAX_POS 200    //1.5mm
-
-#define X_TOOLCHANGE_POS 600000 //120 mm
+//build room 8x10x-2cm
+//#define X_MAX_POS 407600 //80mm
+//#define Y_MAX_POS 509500 //100mm
+#define X_MAX_POS 510000 //110mm
+#define Y_MAX_POS 610000 //120mm
+#define Z_MIN_POS -3300  //20mm (!Z inverted)
 
 //this is where the endswitch is located
 #define X_MIN_POS -10000 //2mm
 #define Y_MIN_POS -10000 //2mm
-#define Z_MIN_POS -3000  //20mm
-  
+#define Z_MAX_POS 200    //1.5mm 
+
+#define X_TOOLCHANGE_POS 600000 //120 mm
+
 //granularity for lines and arcs
-#define STEPSIZE 100 //~0.02 mm per cycle  //review: stepsize lines deg arcs
+#define STEPSIZE 100 //~0.02 mm per cycle  //review
   
 
 //if there is slip (missing steps) with G0 commands, make sure there is no 
@@ -166,7 +168,7 @@ byte stepperZ_pins[4]={10,11,12,13}; //maps to ULN1-4
 #define MAX_Z_FEEDRATE 29.09 //construction 
  
 //table max feedrate in mm/min. 
-#define MAX_XY_FEEDRATE 13.32 //review: obsolete
+#define MAX_XY_FEEDRATE 13.32 
 
 
 //G92 modifies the 0 0 0 position setting
@@ -368,10 +370,7 @@ void core(void){
        emergencySwitch();
 #endif
 
-if(!homing_done)
-  if(steps_X_goto == 0 && steps_X_pos==0 
-     && steps_Y_goto==0 && steps_Y_pos==0 
-     && steps_Z_goto==0 && steps_Z_pos ==0){ homing_done == TRUE; }
+
 
 #ifdef IDLE_STEPPER_POWERSAVE
        steppersPowersave();
@@ -397,12 +396,12 @@ if(control_mode == CONTROL_INTERNAL){
 //positively rearmed at 0 position.  Set X_MIN/Y_MIN/Z_MAX appropriate.
 
    if(stepperZ_endswitch==TRUE){
-         if(digitalRead(ENDSWITCH_X)==HIGH) stepperZ_endswitch=FALSE; // normal operation
+         if(digitalRead(ENDSWITCH_Z)==HIGH) stepperZ_endswitch=FALSE; // normal operation
          if(steps_Z_goto > 0) steps_Z_goto = 0; //go to 0 position
          } 
   //the x switch may need a replacement
   if(stepperX_endswitch==TRUE){
-         if(digitalRead(ENDSWITCH_Z)==HIGH) stepperX_endswitch=FALSE; // normal operation
+         if(digitalRead(ENDSWITCH_X)==HIGH) stepperX_endswitch=FALSE; // normal operation
          if(steps_X_goto < 0 ) steps_X_goto = 0;
          } 
   if(stepperY_endswitch==TRUE){
@@ -416,6 +415,11 @@ if(control_mode == CONTROL_INTERNAL){
  while(time_main + 15 > millis()) ; //  burn 15ms in the main loop
                                    //delay is mainly for the homing cycle. in case of 
                                    //positioning issues in homing set delay up (time_main + 21)
+
+if(!homing_done)
+  if(steps_X_goto == 0 && steps_X_pos==0 
+     && steps_Y_goto==0 && steps_Y_pos==0 
+     && steps_Z_goto==0 && steps_Z_pos ==0){ homing_done = TRUE; }
                                    
 } //main loop done
 
@@ -483,22 +487,22 @@ void doSteps(){
 #ifdef ENDSWITCHES_ENABLED
      //Homing 
     if(stepperX_endswitch==0)
-       if(digitalRead(ENDSWITCH_Z)==LOW){
-                  stepperX_endswitch=1;//disarm endswitch
+       if(digitalRead(ENDSWITCH_X)==LOW){
+                  stepperX_endswitch=TRUE;//disarm endswitch
                   steps_X_goto = X_MIN_POS; //set position to -2mm
                   steps_X_pos  = steps_X_goto;
                   stepperX_enabled = 1;
                   }
     if(stepperY_endswitch==0)
        if(digitalRead(ENDSWITCH_Y)==LOW){
-                  stepperY_endswitch=1;
+                  stepperY_endswitch=TRUE;
                   steps_Y_goto = Y_MIN_POS;
                   steps_Y_pos  = steps_Y_goto;
                   stepperY_enabled = 1;
                   }
     if(stepperZ_endswitch==0)
-       if(digitalRead(ENDSWITCH_X)==LOW){
-                  stepperZ_endswitch=1;
+       if(digitalRead(ENDSWITCH_Z)==LOW){
+                  stepperZ_endswitch=TRUE;
                   steps_Z_goto = Z_MAX_POS;
                   steps_Z_pos  = steps_Z_goto;
                   stepperZ_enabled = 1;
@@ -1256,8 +1260,8 @@ void  setStepperDelays(byte x,byte y,byte z){
  
  
  //calculate feedrate mm/min for xy distance from current stepper delay 
- //assumed x/y_stepspermm are same - the overload is not really a good idea
- float calculateFeedrate(unsigned long dx,unsigned long dy){
+ //assumed x/y_stepspermm are same 
+ float calculateXYFeedrate(unsigned long dx,unsigned long dy){
    //distance in steps
    double steps_xy=sqrt(dx*dx+dy*dy);
    double steps_per_sec = (STEPS_PER_SECOND/(stepperX_delay+1)) + (STEPS_PER_SECOND/(stepperY_delay+1)); //1/0.00125 800 steps per sec
@@ -1340,7 +1344,7 @@ int doLine(long x1, long y1,long z1,float fr){
 
   //if only very small move to go we go there with workspeed, 10 steps
   //off (0.002mm) seems to be far in machine max precision 
-  if(abs(dz==0)&&abs(dx)<10 && abs(dy)<10){ steps_X_goto = x1; steps_Y_goto = y1; waitForDisposition(); return 0;}
+  if(dz==0&&abs(dx)<10 && abs(dy)<10){ steps_X_goto = x1; steps_Y_goto = y1; waitForDisposition(); return 0;}
   
   double xf = (double)dx/(double)STEPSIZE;
   double yf = (double)dy/(double)STEPSIZE;
