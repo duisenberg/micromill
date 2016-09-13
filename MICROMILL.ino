@@ -946,7 +946,7 @@ void machineInit(){//test the homing condition
      
     
     //Z-translator - if Z is from 20mm to 0 M934 P-20.0 - review: no sanity check for values!
-    if(M==934) {  if(P=0) return -1;  translate_Z_offset=P; return 0; }
+    if(M==934) {  if(P==0) return -1;  translate_Z_offset=P; return 0; }
         
     if(M==935) {  translate_Z_offset = 0.0; return 0;       }
 
