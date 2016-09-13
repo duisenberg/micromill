@@ -14,7 +14,7 @@
  *** 0.3 - some G/M commands, lines, manual control+oled obsolete
  *** 0.4 - basic G/M commands, grbl communication protocol emulation
  *** 0.5 - G2/G3 arcs, G20,G21,G90,G91,M934,M6, homing
- *** 0.6 - M3/4/5/10/11/942,G82,83,basic feedrate, halt switch, eeprom
+ *** 0.6 - M3/4/5/10/11/942,G81,82,83,basic feedrate, halt switch, eeprom
  ***
  *** Planned:
  *** 0.7 - lines/arcs with Z parameter , feedrate review
@@ -23,9 +23,9 @@
  *** 
  ***
  *** TODO: 
- *** - review the multiple Gcodes per line feature 
- *** - review feedrate setting per command line
- *** - 
+ *** - review: the multiple Gcodes per line feature 
+ *** - review: feedrate setting per command line
+ *** - review: commands without whitespace
  *** 
  *************************************************************************************************************/
 #include <TimerOne.h>
@@ -34,10 +34,10 @@
 #include <avr/pgmspace.h>
 
 #define VERSION "0.6a" 
-#define FALSE  0
-#define TRUE   1
-#define OFF    0
-#define ON     1
+#define FALSE  B0
+#define TRUE   B1
+#define OFF    B0
+#define ON     B1
 
 //* ************************************
 //* General feature settings
@@ -71,8 +71,11 @@
                            //                       1  - like 0 but with alarm sound/led
                            //                       2  - reboot (doing nothing at restart - not supported yet)
                            //                       42 - activate PIN_MISC only
-
- 
+                           
+//if defined, the value read from S command * 0.0512 is written to 
+//PWM_OUT (A6 by default) to set spindle speed from 10000ccw to 10000cw. 
+//Spindle on/off is controlled by relais still. 
+#define PWM_SPEED_CONTROL
 
 //* *************************************************
 //* Machine specific parameters, construction related
@@ -96,10 +99,8 @@ byte stepperZ_pins[4]={10,11,12,13}; //maps to ULN1-4
   
 #define PIN_MISC        A2  //used for a signal led or something like that
 
-//maybe future additions - analog only pins 
-#define V_INPUT         A6   //voltage monitor
-#define V_DIV_OFFSET    2.15 //voltage divider factor
-//#define VOLTAGE_MONITOR //uncomment to monitor voltage - obsolete: doesnt fit into mem
+//analog only pins
+#define PWM_OUT         A6   //PWM output
 
 #define EM_SWITCH       A7   //emergency switch
   
@@ -210,12 +211,12 @@ boolean stepperZ_endswitch=0;
 boolean steppers_enable =TRUE; 
 boolean machine_idle   = TRUE; 
  
-long int steps_X_goto = 0;
-long int steps_Y_goto = 0;
-long int steps_Z_goto = 0;
-long int steps_X_pos = 0;
-long int steps_Y_pos = 0;
-long int steps_Z_pos = 0;
+volatile long int steps_X_goto = 0;
+volatile long int steps_Y_goto = 0;
+volatile long int steps_Z_goto = 0;
+volatile long int steps_X_pos = 0;
+volatile long int steps_Y_pos = 0;
+volatile long int steps_Z_pos = 0;
   
 #define CONTROL_SERIAL 0
 #define CONTROL_INTERNAL 1
@@ -262,7 +263,6 @@ boolean cp_absolute = TRUE;          //default G90.1/91.1
 boolean unit_is_mm = TRUE; //the default unit is mm
   
 volatile unsigned int machine_init_delay = 0;
-boolean translate_Z=FALSE; //interpret positive Z as negative
 double  translate_Z_offset=0; //with translation, add/sub the offset from 
                             //the incoming Z coordinate to get it into bounds
 boolean toolchange_procedure = FALSE;
@@ -282,7 +282,6 @@ boolean tool_auto_off = FALSE;
 #define EMERGENCY_HOMING_SIGNAL 252
 
 boolean homing_done = !HOMING;
-boolean status_request = FALSE;
 boolean emergency_hold = FALSE;
 
 int command_last_line = 0;
@@ -293,7 +292,8 @@ char disable_string[12] ={"disabled"};
 char serial_command[80]; //serial command string
 volatile boolean serial_command_available;
 volatile boolean ready_for_serial;
-volatile boolean serial_enabled = 1;
+volatile boolean serial_enabled = TRUE;
+volatile boolean status_request = FALSE;
   
 void setup(void) {
       
@@ -311,7 +311,7 @@ void setup(void) {
   digitalWrite(TOOL_CONTROL,HIGH); //TOOL_CONTROL OFF
   digitalWrite(FAN_CONTROL,HIGH);  //FAN_CONTROL OFF
   
-  pinMode(V_INPUT,INPUT);          
+  pinMode(PWM_OUT,OUTPUT);          
   pinMode(EM_SWITCH,INPUT);        
   pinMode(PIN_MISC,OUTPUT);   
  
@@ -360,7 +360,9 @@ void setup(void) {
 void core(void){
     doSerialComm();
     doSteps();
-    if(status_request) sendStatus();    
+    //if(status_request) sendStatus();    
+    //review: sending status from doDisplay may help
+    //        to avoid fuzzy breaks in steppers move 
 }
  
  //the main loop 
@@ -411,26 +413,24 @@ if(control_mode == CONTROL_INTERNAL){
  //Control mode INTERNAL done
  } else if(serial_command_available == 1) executeSerialCommand();
 
- time_main   = millis();
- while(time_main + 15 > millis()) ; //  burn 15ms in the main loop
-                                   //delay is mainly for the homing cycle. in case of 
-                                   //positioning issues in homing set delay up (time_main + 21)
-
+ doDisplay(); //some millis delay
+ 
 if(!homing_done)
   if(steps_X_goto == 0 && steps_X_pos==0 
      && steps_Y_goto==0 && steps_Y_pos==0 
      && steps_Z_goto==0 && steps_Z_pos ==0){ homing_done = TRUE; }
+
+ 
                                    
 } //main loop done
 
 //****************************************************************************************************************
 //**
 
-//Earlier this has been used to update the OLED output which had to go due to 
-//memory needs. Now this is a simple wait routine
-
  void doDisplay() {
 
+ if(status_request) sendStatus();
+//review: reading switch in core
 #ifdef EMERGENCY_SWITCH
  emergencySwitch();
 #endif
@@ -785,7 +785,17 @@ void machineInit(){//test the homing condition
       if(cmd_part[i][0] == '(') { return 0; } //this is comment - should not get here
       if(cmd_part[i][0] == '%') { return 0; } //this is comment - should not get here
 
+#ifdef PWM_SPEED_CONTROL
+      //spindle on/off is controlled by relais ... so we write a permanent pwm to the 
+      //pwm pin. The value area is -10000 to +10000 * 0,0512 -> Analog pin
+      if(cmd_part[i][0] == 'S') { 
+            if(S>10000||S<-10000) return -1;
+            analogWrite(PWM_OUT,S*0.0512);
+            continue;
+            } 
+#else
       if(cmd_part[i][0] == 'S') { return 0; } //spindle speed - ignored
+#endif
       
      //some senders send things like G91 G21 as the command, we do not want this to be an error 
      //but the G91 and G91.1 setting would affect the current line only
@@ -822,11 +832,8 @@ void machineInit(){//test the homing condition
          
     }//for parts
 
-    //in some cases a Z translation comes in handy
-    if(Z<9999 && translate_Z){
-       if(translate_Z_offset!=0) Z=Z+translate_Z_offset;
-          else Z=Z*-1.0; 
-          }
+    //Z translation - offset needs to be set 
+    if(Z<9999 && translate_Z_offset==0 ) { Z=Z+translate_Z_offset;  }
 
 #ifdef DEBUG
     Serial.print(F("DEBUG:")); Serial.print(N);Serial.print(":");
@@ -874,6 +881,7 @@ void machineInit(){//test the homing condition
      Serial.println(F("[***END PROGRAM** - resume Z]"));
      toolControl(OFF);
      fanControl(OFF);
+     tool_auto_off = OFF;
      waitForDisposition();
      steps_X_goto = 0; steps_Y_goto = 0; 
      waitForDisposition();
@@ -881,7 +889,7 @@ void machineInit(){//test the homing condition
      cp_absolute = TRUE; //reset to default
      command_last_line = 0;
      unit_is_mm = MM; 
-     translate_Z = FALSE;
+     translate_Z_offset = 0.0;
      
 #ifdef DEBUG
      Serial.println(F("[M02 ***PROGRAM ENDED***]"));
@@ -937,12 +945,14 @@ void machineInit(){//test the homing condition
    if(M==114) return 0;
      
     
-    //Z-translator - if Z is from 20mm to 0 M934 P-20.0
-    if(M==934) {  if(P!=0.0) translate_Z_offset=P; translate_Z=TRUE; return 0; }
+    //Z-translator - if Z is from 20mm to 0 M934 P-20.0 - review: no sanity check for values!
+    if(M==934) {  if(P=0) return -1;  translate_Z_offset=P; return 0; }
         
-    if(M==935) {  translate_Z_offset = 0.0; translate_Z=FALSE; return 0;       }
+    if(M==935) {  translate_Z_offset = 0.0; return 0;       }
 
-    if(M==942) { tool_auto_off = !tool_auto_off; return 0; }
+    //if a file is canceled and then resent, the toggle toggled wrong. 
+    if(M==942) { tool_auto_off = ON; return 0; }
+    if(M==943) { tool_auto_off = OFF; return 0; }
        
     //M-commands done
     
@@ -979,9 +989,8 @@ void machineInit(){//test the homing condition
      } 
      
    //G1 running in material command. 
-   //review: setting feedrate in doLine
-   if(G == 1){ //check for valid pos
-      if(tool_auto_off==TRUE) toolControl(ON);
+   if(G == 1){ 
+      waitForDisposition(); //make sure the last command is done 
       long x=steps_X_pos;
       long y=steps_Y_pos;
       long z=steps_Z_pos;
@@ -993,21 +1002,21 @@ void machineInit(){//test the homing condition
       if(X < 9999) {
        if(FR>0) stepperX_delay = calculateDelay(FR, steps_X_perunit,STEPPERX_MAX_DELAY);
        x=getSteps(steps_X_pos,steps_X_perunit,X,this_dimension_absolute);
-      }
+       }
       if(Y < 9999){
-        if(FR>0) stepperY_delay = calculateDelay(FR, steps_Y_perunit,STEPPERY_MAX_DELAY);
-        y=getSteps(steps_Y_pos,steps_Y_perunit,Y,this_dimension_absolute);
-      }
- 
+       if(FR>0) stepperY_delay = calculateDelay(FR, steps_Y_perunit,STEPPERY_MAX_DELAY);
+       y=getSteps(steps_Y_pos,steps_Y_perunit,Y,this_dimension_absolute);
+       }
+      
 #ifdef DEBUG
       Serial.print("G1 goto X:");;Serial.print(x);Serial.print(" Y:");Serial.print(y);Serial.print(" Z:");Serial.println(z);
       sendSettings();
 #endif
+      if(tool_auto_off==TRUE) toolControl(ON);
       return doLine(x,y,z,FR);
      }
 
    if(G == 2||G==3){
-      if(tool_auto_off==TRUE) toolControl(ON);
       long  stepsX=steps_X_pos,stepsY=steps_X_pos,stepsZ=steps_Z_pos,stepsI=steps_X_pos,stepsJ=steps_Y_pos;
       stepsX=getSteps(stepsX,steps_X_perunit,X,this_dimension_absolute);
       stepsY=getSteps(stepsY,steps_Y_perunit,Y,this_dimension_absolute);
@@ -1018,6 +1027,7 @@ void machineInit(){//test the homing condition
       
       if(X==9999||Y==9999||I==9999||J==9999) return -10;     
       waitForDisposition();
+      if(tool_auto_off==TRUE) toolControl(ON);
       if(G==2) { return doArc(stepsI,stepsJ,stepsX,stepsY,stepsZ,0,FR); }
        else    { return doArc(stepsI,stepsJ,stepsX,stepsY,stepsZ,1,FR); }
      
@@ -1034,7 +1044,7 @@ void machineInit(){//test the homing condition
       }
       
     //halt at the last given coords
-    if(G==9){waitForDisposition(); return 0;}
+    if(G==9){ waitForDisposition(); return 0;}
      
     if(G==17) return 0;  //select XY plane, default and only setting
     if(G==18) return -1; //no other plane selectable
@@ -1056,16 +1066,18 @@ void machineInit(){//test the homing condition
       return 0;
      }
 
+   if(G == 80) return 0; //drill cycle parameter - ignore (injected by Freecad)
+   
    //review: before issuing a drill cmd Z should be at a safe position. 
+   //review: parameter needed check
    //we then move to xy and than z to retract pos.      
-   if(G == 82 ) { // Drill mode G82 XYZ Rretract Pdwell Ffeed Lrepeats
-     if(tool_auto_off==TRUE) toolControl(ON);
+   if(G == 81||G == 82 ) { // Drill mode G82 XYZ Rretract Pdwell Ffeed Lrepeats
      long bottom_hole = 0.0;
      if(Z<9999) { //review: this should always be absolute here, shouldnt it?
         stepperZ_delay =  Z_DRILL_SPEED ; 
         if(FR>0) stepperZ_delay = calculateDelay(FR, steps_Z_perunit,STEPPERZ_MAX_DELAY);
         bottom_hole=getSteps(steps_Z_pos,steps_Z_perunit,Z,this_dimension_absolute);
-        } 
+        } else return -1;
         
      long retract_pos = 0;
      if(R<9999) { 
@@ -1079,16 +1091,17 @@ void machineInit(){//test the homing condition
      
      stepperX_delay = X_max_speed;
      stepperY_delay = Y_max_speed;
-     if(stepsX!=0xFFFE) steps_X_goto = stepsX; 
-     if(stepsY>0) steps_Y_goto = stepsY;
+     if(stepsX!=0x80000000) steps_X_goto = stepsX; 
+     if(stepsY!=0x80000000) steps_Y_goto = stepsY;
      waitForDisposition();
 
      steps_Z_goto = retract_pos;
      waitForDisposition();  
-     
-     int dwell_time = 500; if(P>0.1) dwell_time = P * 1000; //ms
+     //minimum dwell time for G81
+     int dwell_time = 10; if(P>0.1) dwell_time = P * 1000; //ms
      int repeats=0; if(L>0) repeats=L;
      
+     if(tool_auto_off==TRUE) toolControl(ON);
      return doDrill(bottom_hole,retract_pos,dwell_time,repeats);
     }//G82
    
@@ -1113,20 +1126,21 @@ void machineInit(){//test the homing condition
      
      stepperX_delay = X_max_speed;
      stepperY_delay = Y_max_speed;
-     if(stepsX!=0xFFFE) steps_X_goto = stepsX; 
-     if(stepsY!=0xFFFE) steps_Y_goto = stepsY;
+     if(stepsX!=0x80000000) steps_X_goto = stepsX; 
+     if(stepsY!=0x80000000) steps_Y_goto = stepsY;
      waitForDisposition();
 
      steps_Z_goto = retract_pos;
-     if(tool_auto_off==TRUE) toolControl(ON);
      waitForDisposition();  
+     
+     if(tool_auto_off==TRUE) toolControl(ON);
      
      int dwell_time = 500; if(P>0.1) dwell_time = P * 1000; //ms
      int incpp = 1; if(Q>0) incpp=Q*steps_Z_perunit; 
      int repeats = 2; if(L>2) repeats=L;
      
       //G83 XYZ R-retractpos Pdwelltime Qincrperpeck  Lnum repeats
-      return doPeck( bottom_hole, retract_pos, dwell_time, incpp,  repeats);
+      return doPeck( bottom_hole, retract_pos, dwell_time, incpp, repeats);
       }
      
    //set the rel/abs interpretation - query with $G 
@@ -1170,7 +1184,7 @@ void machineInit(){//test the homing condition
  }
  
 long getSteps(long offset,long steps_perunit,float units,boolean absolute){
-  if(units == 9999) return 0xFFFE; //max long
+  if(units == 9999) return 0x80000000; //max long
   if(absolute) return units * steps_perunit;  
        else    return offset + units * steps_perunit;
  }
@@ -1193,7 +1207,7 @@ void setStepsPerUnit(boolean unit){
 void printUnit(){
   Serial.print(F("Unit "));
   if(unit_is_mm) Serial.println(F("MM"));
-  else         Serial.println(F("INCH"));
+  else           Serial.println(F("INCH"));
  }
 
 //
@@ -1218,19 +1232,19 @@ int grblCommand(char *n){
 
 //check hard limits in mm or steps, return TRUE if in limit
  boolean check_X_limit(long x_pos){ //pos in steps
-    if(x_pos==0xFFFE) return TRUE; //not set 
+    if(x_pos==0x80000000) return TRUE; //not set 
     if(x_pos>0 && x_pos>X_MAX_POS) return FALSE;
     if(x_pos<0 && x_pos<X_MIN_POS) return FALSE;
    return TRUE;
    }
  boolean check_Y_limit(long y_pos){ //pos in steps 
-    if(y_pos==0xFFFE) return TRUE;
+    if(y_pos==0x80000000) return TRUE;
     if(y_pos>0 && y_pos>Y_MAX_POS) return FALSE;
     if(y_pos<0 && y_pos<Y_MIN_POS) return FALSE;
    return TRUE;
    }
  boolean check_Z_limit(long z_pos){ //pos in steps 
-    if(z_pos==0xFFFE) return TRUE;
+    if(z_pos==0x80000000) return TRUE;
     if(z_pos>0 && z_pos>Z_MAX_POS) return FALSE;
     if(z_pos<0 && z_pos<Z_MIN_POS) return FALSE;
    return TRUE;
@@ -1321,9 +1335,9 @@ int doLine(long x1, long y1,long z1,float fr){
   waitForDisposition();
   machine_idle = FALSE;
 
-  if(x1==0xFFFE) x1=steps_X_pos;
-  if(y1==0xFFFE) y1=steps_Y_pos;
-  if(z1==0xFFFE) z1=steps_Z_pos;
+  if(x1==0x80000000) x1=steps_X_pos;
+  if(y1==0x80000000) y1=steps_Y_pos;
+  if(z1==0x80000000) z1=steps_Z_pos;
   
   //if its a single Z move just move it 
   if(x1==steps_X_pos&&y1==steps_Y_pos&&z1!=steps_Z_pos) {steps_Z_goto=z1; waitForDisposition(); return 0; }
@@ -1432,7 +1446,7 @@ Serial.println("ARC PROC.");
   double angle=from_angle;
   double dt=(theta/180.0)*0.5; // 0.5 deg steps 
   long dk =0;
-  if(k!=0xFFFE&&k!=0) dk=k/(theta/dt); //steps to go / number of steps 
+  if(k!=0x80000000&&k!=0) dk=k/(theta/dt); //steps to go / number of steps 
   int steps; 
 
 #ifdef ARC_DEBUG
@@ -1636,10 +1650,10 @@ void sendHelp(){
       if(n==10||n==255) Serial.println(F("$10=3 (status report mask:00000011)")); //always 3
       if(n==11||n==255) Serial.println(F("$11=0.010 (junction deviation, mm)")); //no junction 
 #endif
-      if(n==12||n==255) Serial.println(F("$12=0.002 (arc tolerance, mm)")); //0.002 is ok
+      if(n==12||n==255) Serial.println(F("$12=0.02 (arc tolerance, mm)")); //depends on arc size, 1 deg lines currenly
       if(n==13||n==255) Serial.println(F("$13=0 (report inches, bool)")); //always 0
-      if(n==20||n==255) Serial.println(F("$20=0 (soft limits, bool)")); //maybe 1
-      if(n==21||n==255) Serial.println(F("$21=1 (hard limits, bool)")); //hard limnits are provided
+      if(n==20||n==255) Serial.println(F("$20=1 (soft limits, bool)")); //soft limits are applicable
+      if(n==21||n==255) Serial.println(F("$21=1 (hard limits, bool)")); //hard limits are provided
       if(n==22||n==255) { Serial.print(F("$22="));Serial.print(HOMING);Serial.println(F(" (homing cycle, bool)"));} //see homing 
 #ifdef GRBL_FAKE_FULL
       if(n==23||n==255) Serial.println(F("$23=0 (homing dir invert mask:00000000)")); //always 0
@@ -1667,20 +1681,20 @@ void sendHelp(){
 }
  
 void sendStatus(){
-     status_request = FALSE;
      Serial.print("<"); 
-     if(machine_idle==TRUE) Serial.print(F("Idle,"));
-                  else      Serial.print(F("Busy,"));
-     Serial.print(F("MPos:")); Serial.print(MPOS_X,4);
+     if(machine_idle==TRUE) Serial.print("Idle,");
+                  else      Serial.print("Busy,");
+     Serial.print("MPos:"); Serial.print(MPOS_X,4);
           Serial.print(",");Serial.print(MPOS_Y,4);
           Serial.print(",");Serial.print(MPOS_Z,4);
           Serial.print(",");
-        Serial.print(F("WPos:")); Serial.print(WPOS_X,4);
+        Serial.print("WPos:"); Serial.print(WPOS_X,4);
           Serial.print(",");Serial.print(WPOS_Y,4);
           Serial.print(",");Serial.print(WPOS_Z,4);
         Serial.println(">");   
+      status_request = FALSE;
   }
-// as is the ok message
+  
 void sendOK(){
   Serial.println(F("ok"));
   }
@@ -1712,6 +1726,7 @@ void checkMode(){
     if(!steppers_enable) Serial.println(enable_string);
       else               Serial.println(disable_string);
     if(tool_auto_off==TRUE) Serial.println(F("Tool auto on"));
+    if(translate_Z_offset != 0) { Serial.print(F("Z Translation:")); Serial.println(translate_Z_offset);}
 
     
   }

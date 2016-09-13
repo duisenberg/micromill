@@ -8,9 +8,7 @@ line is answered with "ok". If in parsing or execution an issue comes up, the li
 
 One command line may contain one or more G-commands, but only one "move" command per line. If a "setting" Gcode
 like G90 is lines up with other commands, this ONLY COUNTS FOR THIS SPECIFIC MOVE/line. If such a command is 
-issued seperate, it sets the mode for the whole file. See examples below.
-
-WARNING: This still is a GIGO system - put garbage in, get garbage out. Some errors are catched, some are not. 
+issued separate, it sets the mode for the whole file. See examples below.
 
 
 Each Gcode-command ends with LF (Linefeed, char 10)
@@ -28,8 +26,9 @@ G19                  - issues an error
 G20                  - prog coords are inch (only partially supported, obsolete system)
 G21                  - prog coords are mm
 G28                  - Home pos /0 0 0
-G82 XYZ RPLF         - Drill a hole     Z-bottom hole, R-retractpos P-dwelltime F-feed L-repeats
-G83 XYZ RPQLF        - Drill with Peck -Z-bottom hole, R-retractpos P-dwelltime Q-incrperpeck  L-num repeats
+G81 XYZ RFL          - Drill feed in rapid out w/o dwell Z-bottom hole, R-retractpos, F-feedrate, L-num repeats (FL optional)
+G82 XYZ RFPL         - Drill feed in rapid out with dwell   Z-bottom hole, R-retractpos P-dwelltime F-feed, L-repeats (PFL optional)
+G83 XYZ RPQLF        - Drill with Peck -Z-bottom hole, R-retractpos P-dwelltime Q-incrperpeck  L-repeats (PLF optional)
 G90                  - all positions absolute (default) - see below
 G90.1                - arc centers (IJ) absolute        - see below
 G91                  - all further positions relative   - see below
@@ -45,9 +44,9 @@ M00 Px                - halt/pause prog (issues an error to force the sender to 
 M01                   - halt/pause prog switching off the servos and spindle (issues error like M0)
 M02                   - end program (reset lineno, goto 0 0 0, reset settings like G90/91 to defaults)
 M03                   - Spindle on clockwise
-M04                   - Spindle on clounterclockwise (only with spindle/tool pwm control)
+M04                   - Spindle on counterclockwise (only with spindle/tool pwm control)
 M05                   - Spindle off
-M06                   - tool change - table is driven to a pos the toolhead is accesible, see below
+M06                   - tool change - table is driven to a pos the toolhead is accessible, see below
 M10                   - Vaccuum cleaner (Fan) on
 M11                   - Vaccuum cleaner (Fan) off
 M17                   - enable all steppers
@@ -61,16 +60,16 @@ M121                  - disable endstop detection (not supported, compile time s
 M134                  - write settings to EEPROM (not supported yet)
 M930 - M980           - machine specific M-Codes
 
-M934 Pxxx             - Translate Z coordinates for positive Z generators. Without Poffset set, it will
-                        multiply all incoming Z coordinates with -1. See Appendix C.3
-M935                  - Reset Z translation
+M934 Pxxx             - Set Z coordinate translation for positive Z generators. See Appendix C.3
+M935                  - Unset Z translation
 
-M942                  - Tool auto off feature switch - tool&fan need to be on with M03/M04/M10 once
+M942                  - Tool auto off feature enabled - G0 automaticall switches Tool off, G1 etc on
+M943                  - Tool auto off disabled
 
   
 Misc commands
 Nxxx                  - number in sequence (mostly ignored)
-Fxx.xx                - Feedrate, may be parameter in some commands as well
+Fxx.xx                - Feedrate, may be parameter in some commands as well - affects only work speed!
   
 Example commands 
 N010 G00 X0 Y0 Z0 F010   - max speed to home pos all axes, F - feedrate in mm/min
@@ -91,8 +90,8 @@ at any time, even in a command, all $ commands need to be sent in their own sing
 
 ?                        - status report
 $                        - send help message
-$$                       - send parameter sheet                - semi faked 
-$xxx                     - send parameter no xxx (1-3 digits)  - just sends ok
+$$                       - send parameter sheet                 
+$xxx                     - send parameter no xxx (1-3 digits)  
 $C                       - enable/disable check mode (in check mode all commands are executed but 
                            no stepper is moved.)
 $H                       - not supported, just send ok
@@ -100,25 +99,17 @@ $X                       - interrupt current command - may reset the microproces
 -----------------------------------------------------------------------------------------------------
 Limits and issues
 
-G-Code interpreter
-G-Code is not always G-Code. Professional CAD/CAM systems work with a G-Code postprocessor that translates the
-Code the CAD's developer think is G-Code to Code the current machine may be able to work with - after only few 
-manual corrections. With CAD one often works in all quadrants of an xyz system, the machine is limited to
-only one quadrant. One reason to set a G92 origin somewhere in the middle of the build room - a hard to 
-control feature. Or a hard way from a CAD drawing to working G-Code. See M934. 
-
 G90/91 handling
-Cürrently G90/91 commands sent in a line with a move command are interpreted as valid only for their single line.
+Currently G90/91 commands sent in a line with a move command are interpreted as valid only for their single line.
 This feature may change in future as the G-standard seems to suppose to switch things with each setting command 
 "per program" until another command resets the feature. 
 
 G2/G3 issues
-Default for G2/G3 is G17 XY plane - G18 and G19 are not supported. G2/G3 do work up to 180 deg per command. For
+Default for G2/G3 is G17 XY plane - G18 and G19 are not supported. G2/G3 does work up to 180 deg per command. For
 helical movement - move in circles with xy and feed z in that motion - the Z parameter is supported. In this
 case Z steps will be distributed linear to the XY path for the arc command. In reference mill construction the 
 Z resolution is only 0.06mm per step, so with a 90 deg arc with 0.6mm Z the arc procedure will increase Z like
 1 step per 10 deg.
-
 
 Tool change feature
 One awkward thing for the Mill is to change tools. The machine holder at its stand has to be turned, the 
@@ -136,7 +127,7 @@ drives the table to toolchange position. Resuming the file transfer, the second 
 its last position and the file can be worked off then.
 
 Feedrate issue
-The steppers speed is controlled by the stepper delays, so it can be set only in discrete portions. The lower a
+The steppers speed is controlled by the stepper delays, so it can be set in discrete portions only. The lower a
 feedrate is, the more it can be close to the requested value. In effect, the next settable xy feedrate after
 max 9.42 is 4.71 and then 3.14 and so on. 
 As it reads, the feedrate is calculated from all movement axes. So if there is a combined movement of xy or xyz
