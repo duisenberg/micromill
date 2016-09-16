@@ -833,7 +833,7 @@ void machineInit(){//test the homing condition
     }//for parts
 
     //Z translation - offset needs to be set 
-    if(Z<9999 && translate_Z_offset==0 ) { Z=Z+translate_Z_offset;  }
+    if(Z<9999 && translate_Z_offset!=0 ) { Z=Z+translate_Z_offset;  }
 
 #ifdef DEBUG
     Serial.print(F("DEBUG:")); Serial.print(N);Serial.print(":");
